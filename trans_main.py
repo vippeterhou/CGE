@@ -16,9 +16,9 @@ parser.add_argument('--sup_iters', type=int, default=2000)
 parser.add_argument('--unsup_iters', type=int, default=10000)
 args = parser.parse_args()
 
+print("\n -- Please check the args...")
 for arg in vars(args):
-    print(arg, getattr(args, arg))
-print("\nPlease check the args...")
+    print("    - Args: {}, Value: {};".format(arg, getattr(args, arg)))
 
 m = CGETransModel(args)
 m.loadDataset()

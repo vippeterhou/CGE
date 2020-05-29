@@ -10,10 +10,12 @@ import random
 from collections import defaultdict as dd
 import cPickle
 from utils import compAcc, getMaxAcc, subPath
+from tqdm import tqdm
 
 
 class CGETransModel:
     def __init__(self, args):
+        print(' -- Initializing parameters...')
         self.dataset = args.dataset
         self.embedding_size = args.embedding_size
         self.super_pairs = args.super_pairs
@@ -31,11 +33,10 @@ class CGETransModel:
         self.lstm_hidden_units = 128
         self.bilevel = 10
         self.max_test_acc = 0
-
-        print('Initialize parameters.')
+        print(' -- Done!')
 
     def loadDataset(self):
-        print('Loading {}'.format(self.dataset))
+        print(' -- Loading dataset {}...'.format(self.dataset))
         NAMES = ['x', 'y', 'tx', 'ty', 'graph']
         OBJECTS = []
         for i in range(len(NAMES)):
@@ -48,10 +49,10 @@ class CGETransModel:
         self.x, self.y, self.tx, self.ty, self.graph = tuple(OBJECTS)
         self.num_ver = len(self.graph)
         self.mid = int(self.tx.shape[0] * self.valida_rate)
-        print("Load dataset {} successfully.".format(self.dataset))
+        print(' -- Done!')
 
     def buildModel(self):
-        print('Building...')
+        print(' -- Building...')
         x_init = sparse.csr_matrix('x', dtype='float32')
         y_init = T.imatrix('y')
         g_init = T.imatrix('g')
@@ -158,6 +159,7 @@ class CGETransModel:
                                 reweight_loss,
                                 updates=alpha_updates,
                                 on_unused_input='ignore')
+        print(' -- Done!')
 
     def forSupervised(self):
         labels, label2inst, not_label = [], dd(list), dd(list)
@@ -205,7 +207,8 @@ class CGETransModel:
                             s, m = subPath(l, m, path, self.window_size)
                             sub_paths.append(s)
                             mask.append(m)
-                yield np.array(g, dtype=np.int32),\
+                yield \
+                    np.array(g, dtype=np.int32),\
                     np.array(sub_paths, dtype=np.int32),\
                     np.array(mask, dtype=np.float32)
                 i = j
@@ -234,21 +237,21 @@ class CGETransModel:
                                            dtype=np.int32))
         acc_test = compAcc(pred_test, self.ty[self.mid:self.tx.shape[0]])
         self.max_test_acc = getMaxAcc(self.max_test_acc, acc_test)
-        print('Validate accuracy {:.3f}, Max test accuracy {:.3f}'
-              .format(acc_vali, self.max_test_acc))
 
     def supervisedTrain(self, sup_iter):
-        for i in range(sup_iter):
+        bar = tqdm(range(sup_iter), desc="Supervised Training")
+        for i in bar:
             pairs = next(self.forSupervised())
             loss = self.sup_train(pairs)
-            print('Supervised training: iter {}, loss {:.4f}'.format(i, loss))
+            bar.set_postfix_str("Loss: {:.3f}".format(loss))
 
-    def unsupervisedTrain(self, unsup_iter):  # naming bi-level is better?
-        for i in range(unsup_iter):
+    def unsupervisedTrain(self, unsup_iter):
+        bar = tqdm(range(unsup_iter), desc="Unsupervised Training")
+        for i in bar:
             pairs, sub_path, mask = next(self.forUnsupervised())
             if i % self.bilevel == 0:
                 loss = self.lstm_fn(sub_path, pairs, mask)
             else:
                 loss = self.alpha_fn(sub_path, pairs, mask)
-            print('Unsupervised training: iter {}, loss {:.4f}'.format(i, loss))
             self.test()
+            bar.set_postfix_str("Max Acc: {:.3f}".format(self.max_test_acc))

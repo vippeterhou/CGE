@@ -1,6 +1,5 @@
 from theano import sparse
 import theano.tensor as T
-import lasagne
 import lasagne as lg
 import lasagne.layers as lgl
 import lasagne.objectives as lgo
@@ -11,10 +10,12 @@ import random
 from collections import defaultdict as dd
 import cPickle
 from utils import compAcc, getMaxAcc, subPath, samplePathInd
+from tqdm import tqdm
 
 
 class CGEIndModel:
     def __init__(self, args):
+        print(' -- Initializing parameters...')
         self.dataset = args.dataset
         self.embedding_size = args.embedding_size
         self.super_pairs = args.super_pairs
@@ -32,11 +33,10 @@ class CGEIndModel:
         self.lstm_hidden_units = 128
         self.bilevel = 10
         self.max_test_acc = 0
-
-        print('Initialize parameters.')
+        print(' -- Done!')
 
     def loadDataset(self):
-        print('Loading {}'.format(self.dataset))
+        print(' -- Loading dataset {}...'.format(self.dataset))
         NAMES = ['x', 'y', 'tx', 'ty', 'allx', 'graph']
         OBJECTS = []
         for i in range(len(NAMES)):
@@ -49,10 +49,10 @@ class CGEIndModel:
         self.x, self.y, self.tx, self.ty, self.allx, self.graph = tuple(OBJECTS)
         self.num_ver = self.allx.shape[0]
         self.mid = int(self.tx.shape[0] * self.valida_rate)
-        print("Load dataset {} successfully.".format(self.dataset))
+        print(' -- Done!')
 
     def buildModel(self):
-        print('Building...')
+        print(' -- Building...')
         x_init = sparse.csr_matrix('x', dtype='float32')
         y_init = T.imatrix('y')
         gx_init = sparse.csr_matrix('gx', dtype='float32')
@@ -179,7 +179,7 @@ class CGEIndModel:
                                         updates=alpha_updates,
                                         on_unused_input='ignore')
 
-        print('Build done.')
+        print(' -- Done!')
 
     def forSupervised(self):
         labels, label2inst, not_label = [], dd(list), dd(list)
@@ -260,17 +260,17 @@ class CGEIndModel:
         pred_test = self.test_fn(self.tx[self.mid:self.tx.shape[0]])
         acc_test = compAcc(pred_test, self.ty[self.mid:self.tx.shape[0]])
         self.max_test_acc = getMaxAcc(self.max_test_acc, acc_test)
-        print('Validate accuracy {:.3f}, Max test accuracy {:.3f}'
-              .format(acc_vali, self.max_test_acc))
 
     def supervisedTrain(self, sup_iter):
-        for i in range(sup_iter):
+        bar = tqdm(range(sup_iter), desc="Supervised Training")
+        for i in bar:
             gx, gy, gz = next(self.forSupervised())
             loss = self.sup_train(gx, gy, gz)
-            print('Supervised training: iter {}, loss {:.4f}'.format(i, loss))
+            bar.set_postfix_str("Loss: {:.3f}".format(loss))
 
-    def unsupervisedTrain(self, unsup_iter):  # naming bi-level is better?
-        for i in range(unsup_iter):
+    def unsupervisedTrain(self, unsup_iter):
+        bar = tqdm(range(unsup_iter), desc="Unsupervised Training")
+        for i in bar:
             gx, gy, gz, subPath, mask = next(self.forUnsupervised())
             if i % self.bilevel == 0:
                 loss = self.lstm_fn(gx, gy, gz,
@@ -284,5 +284,5 @@ class CGEIndModel:
                                      self.allx[subPath[:, 1]],
                                      self.allx[subPath[:, 2]],
                                      self.allx[subPath[:, 3]], mask)
-            print('Unsupervised training: iter {}, loss {:.4f}'.format(i, loss))
             self.test()
+            bar.set_postfix_str("Max Acc: {:.3f}".format(self.max_test_acc))
